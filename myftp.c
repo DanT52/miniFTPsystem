@@ -54,6 +54,8 @@ int client_connect(char const* address){
     //done with addrinfo
     freeaddrinfo(actualdata);
 
+    char cmd[] = "B\n";
+    int n = write(sockfd, cmd, strlen(cmd));
     char buffer[20];
     int bytes_read = read(sockfd, buffer, sizeof(buffer));
 

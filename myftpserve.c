@@ -23,7 +23,7 @@
 //sends back the time to the client
 //logs number of total connections the client name.
 void server_response(int connectfd, struct sockaddr_in clientAddr, int listenfd, int times_connected) {
-
+    char buffer[256];
     if (close(listenfd) == -1) fprintf(stderr, "Error: Closing listen socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
 
     char hostName[NI_MAXHOST];
@@ -50,6 +50,10 @@ void server_response(int connectfd, struct sockaddr_in clientAddr, int listenfd,
 
     strftime(buf, 80, "%a %b %e %H:%M:%S", timeinfo);
     buf[18] = '\n';
+
+    int n = read(connectfd, buffer, 255);
+    printf("Received command: %s\n", buffer);
+
     ssize_t write_res = write(connectfd, buf, 19);
     if (write_res == -1) {
         fprintf(stderr, "Error: Write to socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
