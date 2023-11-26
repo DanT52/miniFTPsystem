@@ -46,7 +46,6 @@ void handle_connection(int connectfd, struct sockaddr_in clientAddr, int listenf
 
 
 
-//This function is responsible for starting the server
 
 int main(int argc, char const *argv[]){
 
