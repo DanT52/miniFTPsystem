@@ -3,12 +3,31 @@
 
 
 
+void command_loop(int connectfd){
+    char buffer[256];
+    char buf[80];
+
+    int n = read(connectfd, buffer, 255);
+    printf("Received command: %s", buffer);
+
+    ssize_t write_res = write(connectfd, buf, 19);
+    if (write_res == -1) {
+        fprintf(stderr, "Error: Write to socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+        exit(1);
+    }
+
+    if (close(connectfd) == -1) {
+        fprintf(stderr, "Error: Closing connection socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+        exit(1);
+    }
+    exit(0);
+}
+
 void handle_connection(int connectfd, struct sockaddr_in clientAddr, int listenfd) {
 
 
     pid_t pid = getpid();
-    char buffer[256];
-    char buf[80];
+    
 
     if (close(listenfd) == -1) fprintf(stderr, "Error: Closing listen socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
 
@@ -22,28 +41,14 @@ void handle_connection(int connectfd, struct sockaddr_in clientAddr, int listenf
     
     printf("Child %d: Connection accepted from host %s\n", pid, hostName);
 
-    
-    
-
-    int n = read(connectfd, buffer, 255);
-    printf("Received command: %s", buffer);
-
-    ssize_t write_res = write(connectfd, buf, 19);
-    if (write_res == -1) {
-        fprintf(stderr, "Error: Write to socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
-        exit(1);
-    }
-    
-    if (close(connectfd) == -1) {
-        fprintf(stderr, "Error: Closing connection socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
-        exit(1);
-    }
-    exit(0);
 }
 
 
+
+
 //This function is responsible for starting the server
-int start_server(){
+
+int main(int argc, char const *argv[]){
 
     int listenfd, connectfd;
     struct sockaddr_in servAddr, clientAddr;
@@ -95,13 +100,6 @@ int start_server(){
     }
     // should never reach here
     close(listenfd);
-    return 0;
-}
-
-
-int main(int argc, char const *argv[]){
-
-    start_server();
     return 0;
 }
 
