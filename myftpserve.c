@@ -168,7 +168,7 @@ void command_loop(int connectfd, pid_t pid){
             path = &buffer[1];
             if (chdir(path) != 0){
                 fprintf(stderr, "Child %d: Error: bad path given, continuing...\n", pid);
-                if (write(connectfd, "ENo such file or directory", 27) != 27){
+                if (write(connectfd, "ENo such file or directory\n", 27) != 27){
                     fprintf(stderr, "Child %d: Error: writing Err to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
                     exit(1);
                 }
