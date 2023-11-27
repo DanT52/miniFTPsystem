@@ -8,6 +8,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 
 #define MAX_COMMAND_SIZE 5000
