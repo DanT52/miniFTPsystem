@@ -39,6 +39,42 @@ char* read_socket(int sockfd, pid_t pid) {
     return buffer;
 }
 
+void send_ack(int controlfd, int pid){
+    if (write(controlfd, "A\n", 2) != 2){
+        fprintf(stderr, "Child %d: Error: acknowledgment to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
+        exit(1);
+    }
+}
+
+int rls(int connfd, int pid, int controlfd){
+    pid_t inner_pid = fork();
+
+    if (inner_pid < 0){
+        fprintf(stderr, "Child %d: Error: fork in rls failed, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
+        return 1;
+    }
+
+    if (inner_pid == 0){
+        dup2(connfd, STDOUT_FILENO);
+        close(connfd);
+        close(controlfd);
+        execlp("ls", "ls", "-l", (char *) NULL);
+        exit(1);
+    }
+
+    close(connfd);
+    int result;
+    waitpid(inner_pid, &result, 0);
+
+    if (WIFEXITED(result) && WEXITSTATUS(result) == 0){
+        send_ack(controlfd, pid);
+        return 0;
+    }
+
+    fprintf(stderr, "Child %d: Error: ls command on server failed ... child exiting\n", pid);
+    return 1;
+}
+
 int handle_data_commands(int controlfd, pid_t pid){
     char *buffer;
 
@@ -76,7 +112,7 @@ int handle_data_commands(int controlfd, pid_t pid){
     printf("Child %d: Assigned ephemeral port: %d\n", pid, assignedPort);
     sprintf(acknowledgement, "A%d\n", assignedPort);
 
-    if (write(controlfd, acknowledgement, strlen(acknowledgement)) < 0) {
+    if (write(controlfd, acknowledgement, strlen(acknowledgement)) != strlen(acknowledgement)) {
         fprintf(stderr, "Child %d: Error: sending acknowledgement with portnum, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
         close(datafd);
         return 1;
@@ -96,14 +132,16 @@ int handle_data_commands(int controlfd, pid_t pid){
         close(datafd);
         return 1;
     }
-    printf("ACCEPTED DATA CONNECTION!!\n");
     close(datafd);
 
     buffer = read_socket(controlfd, pid);
 
-    if (buffer[0] == 'L') { //server ls
-            
-    } else if (buffer[0] == 'G') { // get
+    if (buffer[0] == 'L'){
+        free(buffer);
+        return rls(connfd, pid, controlfd);
+    } 
+    
+    else if (buffer[0] == 'G') { // get
 
     } else if (buffer[0] == 'P') { // put
 
@@ -117,7 +155,6 @@ int handle_data_commands(int controlfd, pid_t pid){
 
 void command_loop(int connectfd, pid_t pid){
     char *buffer;
-    char buf[] = "A\n";
     char *path;
 
     while(1){
@@ -128,19 +165,30 @@ void command_loop(int connectfd, pid_t pid){
             if (handle_data_commands(connectfd, pid) == 1) break;
             
         } else if (buffer[0] == 'C') {
+            path = &buffer[1];
+            if (chdir(path) != 0){
+                fprintf(stderr, "Child %d: Error: bad path given, continuing...\n", pid);
+                if (write(connectfd, "ENo such file or directory", 27) != 27){
+                    fprintf(stderr, "Child %d: Error: writing Err to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
+                    exit(1);
+                }
+
+            }else{
+                printf("Child %d: changed current directory to %s\n", pid, path);
+                send_ack(connectfd, pid);
+            }
 
         } else if (buffer[0] == 'Q') {
             fprintf(stderr, "Child %d: quitting...\n", pid);
-            write(connectfd, buf, 2);
+            send_ack(connectfd, pid);
             break;
         }
+        free(buffer);
         
         
     }
-    
-
     if (close(connectfd) == -1) {
-        fprintf(stderr, "Error: Closing connection socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+        fprintf(stderr, "Child %d: Error: Closing connection socket, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
         exit(1);
     }
     free(buffer);
