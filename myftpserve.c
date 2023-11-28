@@ -135,6 +135,7 @@ int handle_data_commands(int controlfd, pid_t pid){
     close(datafd);
 
     buffer = read_socket(controlfd, pid);
+    printf("command recived: %s.\n", buffer);
 
     if (buffer[0] == 'L'){
         free(buffer);
