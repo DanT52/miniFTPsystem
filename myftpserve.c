@@ -90,7 +90,6 @@ int get_file(int controlfd, int datafd, int pid, char *path){
     if (stat(path, &statbuf) != 0) {
         if (errno == ENOENT) {
             send_ack(controlfd, pid, "ENo such file or directory\n");
-            exit(1);
         } else {
         fprintf(stderr, "Child %d: Error: getting file status, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
         send_ack(controlfd, pid, "ECould not get the file status\n");
@@ -124,6 +123,43 @@ int get_file(int controlfd, int datafd, int pid, char *path){
     send_ack(controlfd, pid, NULL);
     close(infile);
     return 0;
+}
+
+int put_file(int controlfd, int datafd, int pid, char *path){
+    char buf[FILESENDBUF];
+    int bytes;
+    printf("Child %d: Writing file %s\n", pid, path);
+
+    int filefd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    if (filefd < 0) {
+        if (errno == EEXIST) {
+            fprintf(stderr, "Error: File %s already exists\n", path);
+            send_ack(controlfd, pid, "EFile already exists...\n");
+        } else {
+            fprintf(stderr, "Child %d: Error opening file %s, STRERR: %s, ERRNO: %d\n", pid, path, strerror(errno), errno);
+            send_ack(controlfd, pid, "ECould not open file for writing\n");
+        }
+        close(filefd);
+        return 0;
+    }
+
+    printf("Child %d: reciving file %s from client\n", pid, path);
+    send_ack(controlfd, pid, NULL);
+    while ((bytes = read(datafd, buf, FILESENDBUF)) > 0) {
+        printf("reading\n");
+        if (write(filefd, buf, bytes) != bytes){
+            fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
+            exit(1);
+        }
+    }
+    if (bytes == -1) {
+        fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d\n exiting...", pid, strerror(errno), errno);
+        exit(1);
+    }
+    
+    close(filefd);
+    return 0;
+
 }
 
 int handle_data_commands(int controlfd, pid_t pid){
@@ -200,6 +236,9 @@ int handle_data_commands(int controlfd, pid_t pid){
 
 
     } else if (buffer[0] == 'P') { // put
+        char *filename = strrchr(&buffer[1], '/');
+        if (!filename)filename = &buffer[1];
+        put_file(controlfd, connfd, pid, filename);
 
     }
     free(buffer);
