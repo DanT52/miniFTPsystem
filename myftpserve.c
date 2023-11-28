@@ -39,11 +39,16 @@ char* read_socket(int sockfd, pid_t pid) {
     return buffer;
 }
 
-void send_ack(int controlfd, int pid){
-    if (write(controlfd, "A\n", 2) != 2){
-        fprintf(stderr, "Child %d: Error: acknowledgment to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
-        exit(1);
+void send_ack(int controlfd, int pid, char *message){
+    if (!message){
+        if (write(controlfd, "A\n", 2) == 2)return;
+    } else {
+        if (write(controlfd, message, strlen(message)) == strlen(message))return;
     }
+
+    fprintf(stderr, "Child %d: Error: acknowledgment to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
+    exit(1);
+
 }
 
 int rls(int connfd, int pid, int controlfd){
@@ -62,17 +67,63 @@ int rls(int connfd, int pid, int controlfd){
         exit(1);
     }
 
-    close(connfd);
     int result;
     waitpid(inner_pid, &result, 0);
-
+    close(connfd);
     if (WIFEXITED(result) && WEXITSTATUS(result) == 0){
-        send_ack(controlfd, pid);
+        send_ack(controlfd, pid, NULL);
         return 0;
     }
 
     fprintf(stderr, "Child %d: Error: ls command on server failed ... child exiting\n", pid);
     return 1;
+}
+
+int get_file(int controlfd, int datafd, int pid, char *path){
+    char buf[FILESENDBUF];
+    struct stat statbuf;
+    int bytes, infile;
+
+    printf("Child %d: Reading file %s\n", pid, path);
+    
+
+    if (stat(path, &statbuf) != 0) {
+        if (errno == ENOENT) {
+            send_ack(controlfd, pid, "ENo such file or directory\n");
+            exit(1);
+        } else {
+        fprintf(stderr, "Child %d: Error: getting file status, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
+        send_ack(controlfd, pid, "ECould not get the file status\n");
+        }
+        return 0;
+    }
+    if (!(S_ISREG(statbuf.st_mode))) {
+        send_ack(controlfd, pid, "EThe specified path is not a Regular File\n");
+        return 0;
+    }
+
+    if ((infile = open(path, O_RDONLY, 0600)) < 0) {
+        send_ack(controlfd, pid, "ECould not open file for reading\n");
+        close(infile);
+        return 0;
+    }
+    printf("Child %d: transmitting file %s to client\n", pid, path);
+    while ((bytes = read(infile, buf, FILESENDBUF)) > 0) {
+        if (write(datafd, buf, bytes) != bytes){
+            send_ack(controlfd, pid, "Eerror Transmitting data\n");
+            fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
+            exit(1);
+        }
+    }
+    if (bytes == -1) {
+        send_ack(controlfd, pid, "Eerror reading File\n");
+        fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
+        close(infile);
+        return 0;
+    }
+    send_ack(controlfd, pid, NULL);
+    close(infile);
+    return 0;
 }
 
 int handle_data_commands(int controlfd, pid_t pid){
@@ -112,16 +163,18 @@ int handle_data_commands(int controlfd, pid_t pid){
     printf("Child %d: Assigned ephemeral port: %d\n", pid, assignedPort);
     sprintf(acknowledgement, "A%d\n", assignedPort);
 
-    if (write(controlfd, acknowledgement, strlen(acknowledgement)) != strlen(acknowledgement)) {
-        fprintf(stderr, "Child %d: Error: sending acknowledgement with portnum, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
-        close(datafd);
-        return 1;
-    }
+    
 
     // listen for connections
 
     if (listen(datafd, 1) < 0) {
         fprintf(stderr, "Child %d: Error: Listening data socket, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
+        close(datafd);
+        return 1;
+    }
+
+    if (write(controlfd, acknowledgement, strlen(acknowledgement)) != strlen(acknowledgement)) {
+        fprintf(stderr, "Child %d: Error: sending acknowledgement with portnum, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
         close(datafd);
         return 1;
     }
@@ -142,12 +195,14 @@ int handle_data_commands(int controlfd, pid_t pid){
         return rls(connfd, pid, controlfd);
     } 
     
-    else if (buffer[0] == 'G') { // get
+    else if (buffer[0] == 'G') { 
+        get_file(controlfd, connfd, pid, &buffer[1]);
+
 
     } else if (buffer[0] == 'P') { // put
 
     }
-
+    free(buffer);
     close(connfd);
     
 
@@ -169,19 +224,15 @@ void command_loop(int connectfd, pid_t pid){
             path = &buffer[1];
             if (chdir(path) != 0){
                 fprintf(stderr, "Child %d: Error: bad path given, continuing...\n", pid);
-                if (write(connectfd, "ENo such file or directory\n", 27) != 27){
-                    fprintf(stderr, "Child %d: Error: writing Err to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
-                    exit(1);
-                }
-
+                send_ack(connectfd, pid, "ENo such file or directory\n");
             }else{
                 printf("Child %d: changed current directory to %s\n", pid, path);
-                send_ack(connectfd, pid);
+                send_ack(connectfd, pid, NULL);
             }
 
         } else if (buffer[0] == 'Q') {
             fprintf(stderr, "Child %d: quitting...\n", pid);
-            send_ack(connectfd, pid);
+            send_ack(connectfd, pid, NULL);
             break;
         }
         free(buffer);

@@ -7,8 +7,10 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
 
 #define MAX_COMMAND_SIZE 5000
@@ -16,3 +18,4 @@
 #define MY_PORT_NUMBER 49999
 #define MY_PORT_NUMBER_STR "49999"
 #define BACKLOG 4
+#define FILESENDBUF 256
