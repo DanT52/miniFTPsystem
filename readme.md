@@ -1,8 +1,11 @@
 # FTP Custom server/client
 
-test 
+## test 
 
-permissions
-test large files / ls when more is needed etc...
-update my prof version with new
-test the file recived with diff
+- permissions
+- test large files and ls when more is needed etc...
+- update my prof version with new
+- test the file recived with diff
+- fatal errors
+- check allocs
+
