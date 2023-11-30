@@ -263,7 +263,7 @@ void command_loop(int connectfd, pid_t pid){
             path = &buffer[1];
             if (chdir(path) != 0){
                 fprintf(stderr, "Child %d: Error: bad path given, continuing...\n", pid);
-                send_ack(connectfd, pid, "ENo such file or directory\n");
+                send_ack(connectfd, pid, "ENo directory\n");
             }else{
                 printf("Child %d: changed current directory to %s\n", pid, path);
                 send_ack(connectfd, pid, NULL);
