@@ -10,3 +10,9 @@
 - fatal errors
 - check allocs
 
+
+---
+I need to 
+send A ON rls before sending the data.
+
+also check how im hadeling fatal errors/ non fatal ones.
