@@ -1,30 +1,87 @@
 #include "myftp.h"
 
+char* read_socket(int sockfd) {
+    int buffer_size = 1;  // Initial buffer size
+    char *buffer = malloc(buffer_size);
 
+    ssize_t bytes_read;
+    size_t total_read = 0;
+    
+    while (1) {
+        bytes_read = read(sockfd, buffer + total_read, 1);
 
-int command_loop();
+        if (bytes_read <= 0) { // Check for socket closure or error
+            if (bytes_read == 0) {
+                // Socket closed
+                fprintf(stderr, "Server unexpectadly closed connection, exiting\n");
+            } else {
+                fprintf(stderr, " Error: read command from control socket failed STRERR: %s, ERRNO: %d, exiting\n", strerror(errno), errno);
+            }
+            free(buffer);
+            close(sockfd);
+            exit(1);
+        }
 
-int main(int argc, char *argv[]) {
+        if (buffer[total_read] == '\n'){
+            break;
+        }
+        total_read ++;
 
-    int port;
-    if (argc != 3 || (port = atoi(argv[1])) <= 0){
-        fprintf(stdout, "Usage: %s <port> <hostname | IP address>\n", argv[0]);
-        return 1;
+        if (total_read >= buffer_size - 1) {
+            buffer_size *= 2;  // Double the buffer size
+            char *new_buffer = realloc(buffer, buffer_size);
+            buffer = new_buffer;
+        }
+    }
+    buffer[total_read] = '\0'; // Null-terminate the string
+    return buffer;
+}
+
+int write_control(int controlfd, char* command, char* pathname, int needAck) {
+    char *message;
+    int message_length;
+
+    if (pathname == NULL) {
+        message_length = strlen(command) + 2;
+        message = malloc(message_length);
+        if (message == NULL) {
+            fprintf(stderr, "Error: Memory allocation failed ... exiting ...\n");
+            exit(1);
+        }
+        sprintf(message, "%s\n", command);
+    } else {
+        message_length = strlen(command) + strlen(pathname) + 2;
+        message = malloc(message_length);
+        if (message == NULL) {
+            fprintf(stderr, "Error: Memory allocation failed ... exiting ...\n");
+            exit(1);
+        }
+        sprintf(message, "%s%s\n", command, pathname);
     }
 
-    char *hostname = argv[2];
+    // Write message to controlfd
+    if (write(controlfd, message, strlen(message)) != strlen(message)) {
+        fprintf(stderr, "Error: writing to server, STRERR: %s, ERRNO: %d ... exiting ...\n", strerror(errno), errno);
+        exit(1);
+    }
 
-    printf("Port: %d\n", port);
-    printf("Hostname/IP: %s\n", hostname);
+    free(message); // Free the allocated memory
 
-    command_loop();
-
-
-
+    // Check for acknowledgment if needed
+    if (needAck) {
+        char *ack = read_socket(controlfd);
+        if (ack[0] == 'E') {
+            // Error response from server
+            fprintf(stdout, "Error response from server: %s\n", ack + 1);
+            return 1;
+        }
+        
+        free(ack); 
+    }
     return 0;
 }
 
-int client_connect(char const* address){
+int client_connect(char const* address, char const* port){
 
     int sockfd; //socket file descriptor
     struct addrinfo hints;
@@ -34,7 +91,7 @@ int client_connect(char const* address){
     hints.ai_family = AF_INET;
 
     // go from address to addrinfo struct
-    int err = getaddrinfo(address, MY_PORT_NUMBER_STR, &hints, &actualdata);
+    int err = getaddrinfo(address, port, &hints, &actualdata);
     if (err != 0){
         fprintf(stderr,"Error: %s\n", gai_strerror(err));
         exit(1);
@@ -54,27 +111,29 @@ int client_connect(char const* address){
     //done with addrinfo
     freeaddrinfo(actualdata);
 
-    char cmd[] = "B\n";
-    int n = write(sockfd, cmd, strlen(cmd));
-    char buffer[20];
-    int bytes_read = read(sockfd, buffer, sizeof(buffer));
-
-    if (bytes_read == -1) {
-        fprintf(stderr, "Error: Reading from socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
-        close(sockfd);
-        exit(1);
-    }
-    buffer[19] = '\0'; //terminate string
-    printf("%s", buffer);
-    if (close(sockfd) == -1) {
-        fprintf(stderr, "Error: Closing socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
-        exit(1);
-    }
-
-    exit(0); //sucess
+    printf("Connected to server %s\n", address);
+    
+    return sockfd;
 }
 
-int command_loop(){
+int start_data(int controlfd, char* hostname){
+    //do data connection
+    if (write_control(controlfd, "D", NULL, 0) == -1) return -1;
+
+    char* server_response = read_socket(controlfd);
+    char* port = &server_response[1];
+
+    int datafd = client_connect(hostname, port);
+    printf("conencted the data connection\n");
+
+    free(server_response);
+
+    return datafd;
+
+}
+
+
+int command_loop(int controlfd, char *hostname){
 
 char *command = NULL;
 size_t command_size = 0;
@@ -90,53 +149,59 @@ size_t command_size = 0;
         }
 
         if (strcmp(token, "exit") == 0) {
-            printf("Exiting program.\n");
             free(command);
+
+            write_control(controlfd, "Q", NULL, 1);
+
+            printf("Exiting program.\n");
+            
             break;
 
         } else if (strcmp(token, "cd") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
-                printf("Error: 'cd' command requires a pathname.\n");
+                printf("Command error: expecting a parameter: 'cd' command requires a pathname.\n");
             } else {
                 // Handle 'cd' command
             }
         } else if (strcmp(token, "rcd") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
-                printf("Error: 'rcd' command requires a pathname.\n");
+                printf("Command error: expecting a parameter: 'rcd' command requires a pathname.\n");
             } else {
                 // Handle 'rcd' command
             }
         } else if (strcmp(token, "ls") == 0) {
 
-            client_connect("localhost");
             // Handle 'ls' command
         } else if (strcmp(token, "rls") == 0) {
+            start_data(controlfd, hostname);
             // Handle 'rls' command
         } else if (strcmp(token, "get") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
-                printf("Error: 'get' command requires a pathname.\n");
+                printf("Command error: expecting a parameter: 'get' command requires a pathname.\n");
             } else {
                 // Handle 'get' command
             }
         } else if (strcmp(token, "show") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
-                printf("Error: 'show' command requires a pathname.\n");
+                printf("Command error: expecting a parameter: 'show' command requires a pathname.\n");
             } else {
                 // Handle 'show' command
             }
         } else if (strcmp(token, "put") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
-                printf("Error: 'put' command requires a pathname.\n");
+                printf("Command error: expecting a parameter: 'put' command requires a pathname.\n");
             } else {
                 // Handle 'put' command
             }
+        } else if (strcmp(token, "") == 0){
+            continue;
         } else {
-            printf("Invalid command.\n");
+            printf("Command '%s' is unknown - ignored\n", command);
         }
 
         free(command);
@@ -146,4 +211,29 @@ size_t command_size = 0;
 
     return 0;
 }
+
+
+
+
+int main(int argc, char *argv[]) {
+
+    int port, controlfd;
+
+    if (argc != 3 || (port = atoi(argv[1])) <= 0){
+        fprintf(stdout, "Usage: %s <port> <hostname | IP address>\n", argv[0]);
+        return 1;
+    }
+
+    char *hostname = argv[2];
+
+    
+
+    controlfd = client_connect(hostname, argv[1]);
+    command_loop(controlfd, hostname);
+
+    return 0;
+}
+
+
+
 
