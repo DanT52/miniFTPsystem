@@ -58,6 +58,7 @@ int rls(int connfd, int pid, int controlfd){
         fprintf(stderr, "Child %d: Error: fork in rls failed, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
         return 1;
     }
+    
 
     if (inner_pid == 0){
         dup2(connfd, STDOUT_FILENO);
@@ -67,11 +68,12 @@ int rls(int connfd, int pid, int controlfd){
         exit(1);
     }
 
+    send_ack(controlfd, pid, NULL);
+
     int result;
     waitpid(inner_pid, &result, 0);
     close(connfd);
     if (WIFEXITED(result) && WEXITSTATUS(result) == 0){
-        send_ack(controlfd, pid, NULL);
         return 0;
     }
 
@@ -146,7 +148,7 @@ int put_file(int controlfd, int datafd, int pid, char *path){
     printf("Child %d: reciving file %s from client\n", pid, path);
     send_ack(controlfd, pid, NULL);
     while ((bytes = read(datafd, buf, FILESENDBUF)) > 0) {
-        printf("reading\n");
+        
         if (write(filefd, buf, bytes) != bytes){
             fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
             exit(1);
@@ -224,7 +226,7 @@ int handle_data_commands(int controlfd, pid_t pid){
     close(datafd);
 
     buffer = read_socket(controlfd, pid);
-    printf("command recived: %s.\n", buffer);
+    printf("Child %d: command recived: %s\n",pid, buffer);
 
     if (buffer[0] == 'L'){
         free(buffer);
@@ -254,7 +256,7 @@ void command_loop(int connectfd, pid_t pid){
 
     while(1){
         buffer = read_socket(connectfd, pid);
-        printf("command recived: %s.\n", buffer);
+        printf("Child %d: command recived: %s\n",pid, buffer);
 
         if (buffer[0] == 'D') {// Establish data connection and send port number
             if (handle_data_commands(connectfd, pid) == 1) break;
