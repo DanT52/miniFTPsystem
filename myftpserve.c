@@ -250,6 +250,32 @@ int handle_data_commands(int controlfd, pid_t pid){
     return 0;
 }
 
+void change_dir(int controlfd, int pid, char *path){
+    if (chdir(path) == -1) {
+        switch (errno) {
+            case EACCES:
+                fprintf(stderr, "Child %d: Error: No access to the directory '%s'\n", pid, path);
+                send_ack(controlfd, pid, "ENo access\n");
+                break;
+            case ENOENT:
+                fprintf(stderr, "Child %d: Error: Directory does not exist '%s'\n", pid, path);
+                send_ack(controlfd, pid, "ENo directory\n");
+                break;
+            case ENOTDIR:
+                fprintf(stderr, "Child %d: Error: Not a directory '%s'\n", pid, path);
+                send_ack(controlfd, pid, "ENot a directory\n");
+                break;
+            default:
+                fprintf(stderr, "Child %d: Error: bad path given, %s\n", pid, strerror(errno));
+                send_ack(controlfd, pid, "EError changing directories\n");
+                break;
+        }
+    } else {
+        printf("Child %d: changed current directory to %s\n", pid, path);
+        send_ack(controlfd, pid, NULL);
+    }
+}
+
 void command_loop(int connectfd, pid_t pid){
     char *buffer;
     char *path;
@@ -260,18 +286,10 @@ void command_loop(int connectfd, pid_t pid){
 
         if (buffer[0] == 'D') {// Establish data connection and send port number
             if (handle_data_commands(connectfd, pid) == 1) break;
-            
-        } else if (buffer[0] == 'C') {
-            path = &buffer[1];
-            if (chdir(path) != 0){
-                fprintf(stderr, "Child %d: Error: bad path given, continuing...\n", pid);
-                send_ack(connectfd, pid, "ENo directory\n");
-            }else{
-                printf("Child %d: changed current directory to %s\n", pid, path);
-                send_ack(connectfd, pid, NULL);
-            }
 
-        } else if (buffer[0] == 'Q') {
+        } else if (buffer[0] == 'C') change_dir(connectfd, pid, &buffer[1]);
+        
+        else if (buffer[0] == 'Q') {
             fprintf(stderr, "Child %d: quitting...\n", pid);
             send_ack(connectfd, pid, NULL);
             break;
