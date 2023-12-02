@@ -131,6 +131,56 @@ int start_data(int controlfd, char* hostname){
     return datafd;
 
 }
+void run_more(int read_end) {
+    int pidmore = fork();
+
+    if(pidmore == -1) {
+        fprintf(stderr, "Error: Fork for more, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+        exit(1);
+    }
+
+    if (pidmore != 0){
+        close(read_end);
+        waitpid(pidmore, NULL, 0);
+        return;
+    }
+
+    dup2(read_end, STDIN_FILENO);
+    close(read_end);
+    execlp("more", "more", "-20", NULL);
+    fprintf(stderr, "Error: exec more, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+    exit(1);
+}
+
+void client_ls(){
+    int pipefd[2];
+    int pidls;
+
+    if (pipe(pipefd) == -1){
+        fprintf(stderr, "Error: Pipe creation, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+        return;
+    }
+
+    pidls = fork();
+    if (pidls == -1){
+        fprintf(stderr, "Error: Fork for ls, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+        return;
+    }
+
+    if (pidls != 0){
+        close(pipefd[1]);
+        run_more(pipefd[0]);
+        waitpid(pidls, NULL, 0);
+        return;
+    }
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    execlp("ls", "ls", "-l", NULL);
+    fprintf(stderr, "Error: exec ls, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+    exit(1);
+}
+
 
 
 int command_loop(int controlfd, char *hostname){
@@ -158,11 +208,16 @@ size_t command_size = 0;
             break;
 
         } else if (strcmp(token, "cd") == 0) {
-            char *pathname = strtok(NULL, " ");
-            if (pathname == NULL) {
+            char *path = strtok(NULL, " ");
+            if (path == NULL) {
                 printf("Command error: expecting a parameter: 'cd' command requires a pathname.\n");
             } else {
-                // Handle 'cd' command
+                if (chdir(path) == -1) {
+                    if (errno == EACCES) fprintf(stderr, "Change directory: No access to the directory '%s'\n", path);
+                    else if (errno == ENOENT) fprintf(stderr, "Change directory: Directory does not exist '%s'\n", path);
+                    else if (errno == ENOTDIR) fprintf(stderr, "Change directory: Not a directory '%s'\n", path);
+                    else fprintf(stderr, "Error: Change directory, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+                }
             }
         } else if (strcmp(token, "rcd") == 0) {
             char *pathname = strtok(NULL, " ");
@@ -171,10 +226,9 @@ size_t command_size = 0;
             } else {
                 // Handle 'rcd' command
             }
-        } else if (strcmp(token, "ls") == 0) {
-
-            // Handle 'ls' command
-        } else if (strcmp(token, "rls") == 0) {
+        } else if (strcmp(token, "ls") == 0) client_ls();
+        
+        else if (strcmp(token, "rls") == 0) {
             start_data(controlfd, hostname);
             // Handle 'rls' command
         } else if (strcmp(token, "get") == 0) {
