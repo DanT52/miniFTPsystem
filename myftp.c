@@ -73,6 +73,7 @@ int write_control(int controlfd, char* command, char* pathname, int needAck) {
         if (ack[0] == 'E') {
             // Error response from server
             fprintf(stdout, "Error response from server: %s\n", ack + 1);
+            free(ack);
             return 1;
         }
         
@@ -111,7 +112,7 @@ int client_connect(char const* address, char const* port){
     //done with addrinfo
     freeaddrinfo(actualdata);
 
-    printf("Connected to server %s\n", address);
+    
     
     return sockfd;
 }
@@ -124,7 +125,7 @@ int start_data(int controlfd, char* hostname){
     char* port = &server_response[1];
 
     int datafd = client_connect(hostname, port);
-    printf("conencted the data connection\n");
+    
 
     free(server_response);
 
@@ -181,12 +182,122 @@ void client_ls(){
     exit(1);
 }
 
+void server_ls(int controlfd, char *hostname){
+    int datafd = start_data(controlfd, hostname);
+    if (write_control(controlfd, "L", NULL, 1) == 1){
+        close(datafd);
+        return;
+    }
+    run_more(datafd);
+    close(datafd);
+}
 
+void server_show(int controlfd, char *hostname, char *path){
+    int datafd = start_data(controlfd, hostname);
+    if (write_control(controlfd, "G", path, 1) == 1){
+        close(datafd);
+        return;
+    }
+    run_more(datafd);
+    close(datafd);
+}
+
+int recive_file(int controlfd, char *hostname, char *path){
+    char buf[FILESENDBUF];
+    int bytes;
+
+    char *filename = strrchr(path, '/');
+    filename = (!filename) ? path : &filename[1];
+
+
+    int filefd = open(filename, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    if (filefd < 0) {
+        if (errno == EEXIST) {
+            fprintf(stderr, "Get File: Error File %s already exists\n", filename);
+        } else {
+            fprintf(stderr, "Get File: Error opening file %s, STRERR: %s, ERRNO: %d\n", filename, strerror(errno), errno);
+        }
+        close(filefd);
+        return 1;
+    }
+    int datafd = start_data(controlfd, hostname);
+
+    if (write_control(controlfd, "G", path, 1) == 1){
+        close(datafd);
+        close(filefd);
+        unlink(filename);
+        return 1;
+    }
+
+    while ((bytes = read(datafd, buf, FILESENDBUF)) > 0) {
+        
+        if (write(filefd, buf, bytes) != bytes){
+            fprintf(stderr, "Get File: Error error writing to file, STRERR: %s, ERRNO: %d, aborted...\n", strerror(errno), errno);
+            unlink(filename);
+            break;
+        }
+    }
+    if (bytes == -1){
+        fprintf(stderr, "Get File: Error reciving file, STRERR: %s, ERRNO: %d\n aborted...", strerror(errno), errno);
+        unlink(filename);
+    } 
+
+
+    close(filefd);
+    close(datafd);
+    return 0;
+
+}
+
+int send_file(int controlfd, char *hostname, char *path){
+    char buf[FILESENDBUF];
+    struct stat statbuf;
+    int bytes, infile;
+
+
+    if (stat(path, &statbuf) != 0) {
+        if (errno == ENOENT) printf("put file: No such file or directory '%s'\n", path);
+        else fprintf(stderr, "put file: Error getting file status, STRERR: %s, ERRNO: %d, exiting\n", strerror(errno), errno);
+        return 1;
+    }
+    if (!(S_ISREG(statbuf.st_mode))) {
+        printf("put file: The specified path is not a Regular File '%s'\n", path);
+        return 1;
+    }
+
+    if ((infile = open(path, O_RDONLY, 0600)) < 0) {
+        printf("put file: Could not open file for reading '%s'\n", path);
+        close(infile);
+        return 0;
+    }
+
+    int datafd = start_data(controlfd, hostname);
+
+    if (write_control(controlfd, "P", path, 1) == 1){
+        close(datafd);
+        return 0;
+    }
+
+    while ((bytes = read(infile, buf, FILESENDBUF)) > 0) {
+        if (write(datafd, buf, bytes) != bytes){
+
+            fprintf(stderr, "put file: error Transmitting data, STRERR: %s, ERRNO: %d, aborting...\n", strerror(errno), errno);
+            break;
+
+        }
+    }
+    if (bytes == -1) fprintf(stderr, "put file: Error reading file, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
+
+    close(datafd);
+    close(infile);
+    return 0;
+}
 
 int command_loop(int controlfd, char *hostname){
 
 char *command = NULL;
 size_t command_size = 0;
+    printf("Connected to server %s\n", hostname);
 
     while (printf("MYFTP> ") && getline(&command, &command_size, stdin) != -1) {
         
@@ -224,33 +335,32 @@ size_t command_size = 0;
             if (pathname == NULL) {
                 printf("Command error: expecting a parameter: 'rcd' command requires a pathname.\n");
             } else {
-                // Handle 'rcd' command
+                write_control(controlfd, "C", pathname, 1);
             }
         } else if (strcmp(token, "ls") == 0) client_ls();
         
-        else if (strcmp(token, "rls") == 0) {
-            start_data(controlfd, hostname);
-            // Handle 'rls' command
-        } else if (strcmp(token, "get") == 0) {
+        else if (strcmp(token, "rls") == 0) server_ls(controlfd, hostname);
+
+        else if (strcmp(token, "get") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
                 printf("Command error: expecting a parameter: 'get' command requires a pathname.\n");
             } else {
-                // Handle 'get' command
+                recive_file(controlfd, hostname, pathname);
             }
         } else if (strcmp(token, "show") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
                 printf("Command error: expecting a parameter: 'show' command requires a pathname.\n");
             } else {
-                // Handle 'show' command
+                server_show(controlfd, hostname, pathname);
             }
         } else if (strcmp(token, "put") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
                 printf("Command error: expecting a parameter: 'put' command requires a pathname.\n");
             } else {
-                // Handle 'put' command
+                send_file(controlfd, hostname, pathname);
             }
         } else if (strcmp(token, "") == 0){
             continue;

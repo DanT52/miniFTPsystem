@@ -135,7 +135,7 @@ int put_file(int controlfd, int datafd, int pid, char *path){
     int filefd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
     if (filefd < 0) {
         if (errno == EEXIST) {
-            fprintf(stderr, "Error: File %s already exists\n", path);
+            fprintf(stderr, "Child %d: Error: File %s already exists\n", pid, path);
             send_ack(controlfd, pid, "EFile already exists...\n");
         } else {
             fprintf(stderr, "Child %d: Error opening file %s, STRERR: %s, ERRNO: %d\n", pid, path, strerror(errno), errno);
@@ -239,7 +239,9 @@ int handle_data_commands(int controlfd, pid_t pid){
 
     } else if (buffer[0] == 'P') { // put
         char *filename = strrchr(&buffer[1], '/');
-        if (!filename)filename = &buffer[1];
+
+        filename = (!filename) ? &buffer[1] : &filename[1];
+
         put_file(controlfd, connfd, pid, filename);
 
     }
