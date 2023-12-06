@@ -2,7 +2,7 @@
 
 
 char* read_socket(int sockfd, pid_t pid) {
-    int buffer_size = 1;  // Initial buffer size
+    int buffer_size = 1;
     char *buffer = malloc(buffer_size);
 
     ssize_t bytes_read;
@@ -11,9 +11,9 @@ char* read_socket(int sockfd, pid_t pid) {
     while (1) {
         bytes_read = read(sockfd, buffer + total_read, 1);
 
-        if (bytes_read <= 0) { // Check for socket closure or error
+        if (bytes_read <= 0) { 
             if (bytes_read == 0) {
-                // Socket closed
+
                 fprintf(stderr, "Child %d: client unexpectadly closed connection, exiting\n", pid);
 
             } else {
@@ -30,12 +30,12 @@ char* read_socket(int sockfd, pid_t pid) {
         total_read ++;
 
         if (total_read >= buffer_size - 1) {
-            buffer_size *= 2;  // Double the buffer size
+            buffer_size *= 2; 
             char *new_buffer = realloc(buffer, buffer_size);
             buffer = new_buffer;
         }
     }
-    buffer[total_read] = '\0'; // Null-terminate the string
+    buffer[total_read] = '\0';
     return buffer;
 }
 
@@ -74,6 +74,7 @@ int rls(int connfd, int pid, int controlfd){
     waitpid(inner_pid, &result, 0);
     close(connfd);
     if (WIFEXITED(result) && WEXITSTATUS(result) == 0){
+        printf("Child %d: ls data sent over data connection: %d\n", pid);
         return 0;
     }
 
@@ -133,7 +134,6 @@ int get_file(int controlfd, int datafd, int pid, char *path){
 int put_file(int controlfd, int datafd, int pid, char *path){
     char buf[FILESENDBUF];
     int bytes;
-    printf("Child %d: Writing file %s\n", pid, path);
 
     int filefd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
     if (filefd < 0) {
@@ -180,21 +180,18 @@ int handle_data_commands(int controlfd, pid_t pid){
         return 1;
     }
 
-    // initialize server address structure
     memset(&servAddr, 0, sizeof(servAddr));
     servAddr.sin_family = AF_INET;
     servAddr.sin_port = htons(0);
     servAddr.sin_addr.s_addr = htons(INADDR_ANY);
     char acknowledgement[32];
 
-    // bind socket to server address
     if (bind(datafd, (struct sockaddr *) &servAddr, sizeof(servAddr)) < 0){
         fprintf(stderr, "Child %d: Error: Binding data socket, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
         close(datafd);
         return 1;
     }
 
-    // Retrieve the assigned port number
     if (getsockname(datafd, (struct sockaddr *)&servAddr, &addrlen) < 0) {
         fprintf(stderr, "Child %d: Error: getting data socket name, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
         close(datafd);
@@ -203,10 +200,6 @@ int handle_data_commands(int controlfd, pid_t pid){
     int assignedPort = ntohs(servAddr.sin_port);
     printf("Child %d: Assigned ephemeral port: %d\n", pid, assignedPort);
     sprintf(acknowledgement, "A%d\n", assignedPort);
-
-    
-
-    // listen for connections
 
     if (listen(datafd, 1) < 0) {
         fprintf(stderr, "Child %d: Error: Listening data socket, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
@@ -227,6 +220,8 @@ int handle_data_commands(int controlfd, pid_t pid){
         return 1;
     }
     close(datafd);
+
+    printf("Child %d: Data socket accepted connection:\n", pid);
 
     buffer = read_socket(controlfd, pid);
     printf("Child %d: command recived: %s\n",pid, buffer);
@@ -289,13 +284,13 @@ void command_loop(int connectfd, pid_t pid){
         buffer = read_socket(connectfd, pid);
         printf("Child %d: command recived: %s\n",pid, buffer);
 
-        if (buffer[0] == 'D') {// Establish data connection and send port number
+        if (buffer[0] == 'D') {
             if (handle_data_commands(connectfd, pid) == 1) break;
 
         } else if (buffer[0] == 'C') change_dir(connectfd, pid, &buffer[1]);
         
         else if (buffer[0] == 'Q') {
-            fprintf(stderr, "Child %d: quitting...\n", pid);
+            fprintf(stderr, "Child %d: quitting normally...\n", pid);
             send_ack(connectfd, pid, NULL);
             break;
         }
@@ -347,20 +342,17 @@ int main(int argc, char const *argv[]){
         fprintf(stderr, "Error: Socket creation, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
         exit(1);
     }
-    // initialize server address structure
     memset(&servAddr, 0, sizeof(servAddr));
     servAddr.sin_family = AF_INET;
     servAddr.sin_port = htons(MY_PORT_NUMBER);
     servAddr.sin_addr.s_addr = htons(INADDR_ANY);
 
-    // bind socket to server address
     if (bind(listenfd, (struct sockaddr *) &servAddr, sizeof(servAddr)) < 0){
         fprintf(stderr, "Error: Binding, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
         close(listenfd);
         exit(1);
     }
 
-    // listen for connections
     if (listen(listenfd, BACKLOG) < 0) {
         fprintf(stderr, "Error: Listening, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
         close(listenfd);
@@ -369,24 +361,23 @@ int main(int argc, char const *argv[]){
     
     int length = sizeof(clientAddr);
 
-    //forever loop
     while (1) {
         connectfd = accept(listenfd, (struct sockaddr *) &clientAddr, &length);
         
         if (connectfd == -1) {
             fprintf(stderr, "Error: Accepting connection, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
-            continue;  // or decide to exit based on the type of error
+            continue; 
         }
         int pid = fork();
         if (pid == -1) {
             fprintf(stderr, "Error: Forking failed, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
             exit(1);
         }
-        if (pid == 0) {            // child process
-            handle_connection(connectfd, clientAddr, listenfd);  // Call the new function here
-        } else {  // parent process
+        if (pid == 0) {
+            handle_connection(connectfd, clientAddr, listenfd);
+        } else {
             printf("Parent: spawned child %d, waiting for new connection\n", pid);
-            close(connectfd);  // Close the connected socket in the parent
+            close(connectfd);
             int status;
             pid_t done = waitpid(-1, &status, WNOHANG);
             if (done > 0) {
@@ -394,7 +385,6 @@ int main(int argc, char const *argv[]){
             }
         } 
     }
-    // should never reach here
     close(listenfd);
     return 0;
 }
