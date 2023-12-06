@@ -109,11 +109,10 @@ int get_file(int controlfd, int datafd, int pid, char *path){
         return 0;
     }
     printf("Child %d: transmitting file %s to client\n", pid, path);
+    send_ack(controlfd, pid, NULL);
     while ((bytes = read(infile, buf, FILESENDBUF)) > 0) {
         if (write(datafd, buf, bytes) != bytes){
-            send_ack(controlfd, pid, "Eerror Transmitting data\n");
             fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
-            exit(1);
         }
     }
     if (bytes == -1) {
@@ -122,7 +121,7 @@ int get_file(int controlfd, int datafd, int pid, char *path){
         close(infile);
         return 0;
     }
-    send_ack(controlfd, pid, NULL);
+    
     close(infile);
     return 0;
 }
@@ -151,12 +150,12 @@ int put_file(int controlfd, int datafd, int pid, char *path){
         
         if (write(filefd, buf, bytes) != bytes){
             fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
-            exit(1);
+            unlink(filefd);
         }
     }
     if (bytes == -1) {
         fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d\n exiting...", pid, strerror(errno), errno);
-        exit(1);
+        unlink(filefd);   
     }
     
     close(filefd);
