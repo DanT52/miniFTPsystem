@@ -260,6 +260,10 @@ int send_file(int controlfd, char *hostname, char *path){
         else fprintf(stderr, "put file: Error getting file status, STRERR: %s, ERRNO: %d, exiting\n", strerror(errno), errno);
         return 1;
     }
+    if (!(statbuf.st_mode & S_IRUSR)) {
+        printf("put file: No read permission on file '%s'\n", path);
+        return 1;
+    }
     if (!(S_ISREG(statbuf.st_mode))) {
         printf("put file: The specified path is not a Regular File '%s'\n", path);
         return 1;

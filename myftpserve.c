@@ -98,6 +98,10 @@ int get_file(int controlfd, int datafd, int pid, char *path){
         }
         return 0;
     }
+    if (!(statbuf.st_mode & S_IRUSR)) {
+        send_ack(controlfd, pid, "ENo read permission on file\n");
+        return 0;
+    }
     if (!(S_ISREG(statbuf.st_mode))) {
         send_ack(controlfd, pid, "EThe specified path is not a Regular File\n");
         return 0;
