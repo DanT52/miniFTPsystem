@@ -16,3 +16,4 @@ test with big files and clean up code
 also check how im hadeling fatal errors/ non fatal ones.
 
 
+if we cannot read or write to the control connection it is a fatal error.
