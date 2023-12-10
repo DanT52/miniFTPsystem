@@ -3,29 +3,21 @@
 char* read_socket(int sockfd) {
     int buffer_size = 1;  
     char *buffer = malloc(buffer_size);
-
     ssize_t bytes_read;
     size_t total_read = 0;
     
     while (1) {
         bytes_read = read(sockfd, buffer + total_read, 1);
-
         if (bytes_read <= 0) {
-            if (bytes_read == 0) {
-                fprintf(stderr, "Server unexpectadly closed connection, exiting\n");
-            } else {
-                fprintf(stderr, " Error: read command from control socket failed STRERR: %s, ERRNO: %d, exiting\n", strerror(errno), errno);
-            }
+            if (bytes_read == 0) fprintf(stderr, "Server unexpectadly closed connection, exiting\n");
+            else fprintf(stderr, " Error: read command from control socket failed STRERR: %s, ERRNO: %d, exiting\n", strerror(errno), errno);
             free(buffer);
             close(sockfd);
             exit(1);
         }
-
-        if (buffer[total_read] == '\n'){
-            break;
-        }
+        if (buffer[total_read] == '\n') break;
+        
         total_read ++;
-
         if (total_read >= buffer_size - 1) {
             buffer_size *= 2;
             char *new_buffer = realloc(buffer, buffer_size);
@@ -62,7 +54,6 @@ int write_control(int controlfd, char* command, char* pathname, int needAck) {
         fprintf(stderr, "Error: writing to server, STRERR: %s, ERRNO: %d ... exiting ...\n", strerror(errno), errno);
         exit(1);
     }
-
     free(message);
 
     if (needAck) {
@@ -110,25 +101,25 @@ int client_connect(char const* address, char const* port){
 
 int start_data(int controlfd, char* hostname){
 
-    if (write_control(controlfd, "D", NULL, 0) == -1) return -1;
+    if (write_control(controlfd, "D", NULL, 0) == -1){
+        fprintf(stderr, "Error: writing to server, STRERR: %s, ERRNO: %d ... exiting ...\n", strerror(errno), errno);
+        exit(1);
+    }
 
     char* server_response = read_socket(controlfd);
     char* port = &server_response[1];
-
     int datafd = client_connect(hostname, port);
     
-
     free(server_response);
-
     return datafd;
-
 }
-void run_more(int read_end) {
-    int pidmore = fork();
 
+void run_more(int read_end) {
+
+    int pidmore = fork();
     if(pidmore == -1) {
         fprintf(stderr, "Error: Fork for more, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
-        exit(1);
+        return;
     }
 
     if (pidmore != 0){
@@ -200,7 +191,6 @@ int recive_file(int controlfd, char *hostname, char *path){
     char *filename = strrchr(path, '/');
     filename = (!filename) ? path : &filename[1];
 
-
     int filefd = open(filename, O_WRONLY | O_CREAT | O_EXCL, 0666);
     if (filefd < 0) {
         if (errno == EEXIST) {
@@ -212,7 +202,6 @@ int recive_file(int controlfd, char *hostname, char *path){
         return 1;
     }
     int datafd = start_data(controlfd, hostname);
-
     if (write_control(controlfd, "G", path, 1) == 1){
         close(datafd);
         close(filefd);
@@ -233,7 +222,6 @@ int recive_file(int controlfd, char *hostname, char *path){
         unlink(filename);
     } 
 
-
     close(filefd);
     close(datafd);
     return 0;
@@ -244,7 +232,6 @@ int send_file(int controlfd, char *hostname, char *path){
     char buf[FILESENDBUF];
     struct stat statbuf;
     int bytes, infile;
-
 
     if (stat(path, &statbuf) != 0) {
         if (errno == ENOENT) printf("put file: No such file or directory '%s'\n", path);
@@ -259,7 +246,6 @@ int send_file(int controlfd, char *hostname, char *path){
         printf("put file: The specified path is not a Regular File '%s'\n", path);
         return 1;
     }
-
     if ((infile = open(path, O_RDONLY, 0600)) < 0) {
         printf("put file: Could not open file for reading '%s'\n", path);
         close(infile);
@@ -270,15 +256,13 @@ int send_file(int controlfd, char *hostname, char *path){
 
     if (write_control(controlfd, "P", path, 1) == 1){
         close(datafd);
-        return 0;
+        return 1;
     }
 
     while ((bytes = read(infile, buf, FILESENDBUF)) > 0) {
         if (write(datafd, buf, bytes) != bytes){
-
             fprintf(stderr, "put file: error Transmitting data, STRERR: %s, ERRNO: %d, aborting...\n", strerror(errno), errno);
             break;
-
         }
     }
     if (bytes == -1) fprintf(stderr, "put file: Error reading file, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
@@ -297,19 +281,14 @@ size_t command_size = 0;
     while (printf("MYFTP> ") && getline(&command, &command_size, stdin) != -1) {
         
         command[strcspn(command, "\n")] = 0;
-
         char *token = strtok(command, " ");
         if (token == NULL) {
             continue;
         }
-
         if (strcmp(token, "exit") == 0) {
             free(command);
-
             write_control(controlfd, "Q", NULL, 1);
-
             printf("Exiting program.\n");
-            
             break;
 
         } else if (strcmp(token, "cd") == 0) {
@@ -326,41 +305,28 @@ size_t command_size = 0;
             }
         } else if (strcmp(token, "rcd") == 0) {
             char *pathname = strtok(NULL, " ");
-            if (pathname == NULL) {
-                printf("Command error: expecting a parameter: 'rcd' command requires a pathname.\n");
-            } else {
-                write_control(controlfd, "C", pathname, 1);
-            }
-        } else if (strcmp(token, "ls") == 0) client_ls();
-        
+            if (pathname == NULL) printf("Command error: expecting a parameter: 'rcd' command requires a pathname.\n");
+            else write_control(controlfd, "C", pathname, 1);
+        } 
+        else if (strcmp(token, "ls") == 0) client_ls();
         else if (strcmp(token, "rls") == 0) server_ls(controlfd, hostname);
-
         else if (strcmp(token, "get") == 0) {
             char *pathname = strtok(NULL, " ");
-            if (pathname == NULL) {
-                printf("Command error: expecting a parameter: 'get' command requires a pathname.\n");
-            } else {
-                recive_file(controlfd, hostname, pathname);
-            }
-        } else if (strcmp(token, "show") == 0) {
+            if (pathname == NULL) printf("Command error: expecting a parameter: 'get' command requires a pathname.\n");
+            else recive_file(controlfd, hostname, pathname);
+        } 
+        else if (strcmp(token, "show") == 0) {
             char *pathname = strtok(NULL, " ");
-            if (pathname == NULL) {
-                printf("Command error: expecting a parameter: 'show' command requires a pathname.\n");
-            } else {
-                server_show(controlfd, hostname, pathname);
-            }
-        } else if (strcmp(token, "put") == 0) {
+            if (pathname == NULL) printf("Command error: expecting a parameter: 'show' command requires a pathname.\n");
+            else server_show(controlfd, hostname, pathname);
+        } 
+        else if (strcmp(token, "put") == 0) {
             char *pathname = strtok(NULL, " ");
-            if (pathname == NULL) {
-                printf("Command error: expecting a parameter: 'put' command requires a pathname.\n");
-            } else {
-                send_file(controlfd, hostname, pathname);
-            }
-        } else if (strcmp(token, "") == 0){
-            continue;
-        } else {
-            printf("Command '%s' is unknown - ignored\n", command);
+            if (pathname == NULL) printf("Command error: expecting a parameter: 'put' command requires a pathname.\n");
+            else send_file(controlfd, hostname, pathname);
         }
+        else printf("Command '%s' is unknown - ignored\n", command);
+        
         free(command);
         command = NULL; 
         command_size = 0; 
@@ -371,12 +337,10 @@ size_t command_size = 0;
 int main(int argc, char *argv[]) {
 
     int port, controlfd;
-
     if (argc != 3 || (port = atoi(argv[1])) <= 0){
         fprintf(stdout, "Usage: %s <port> <hostname | IP address>\n", argv[0]);
         return 1;
     }
-
     char *hostname = argv[2];
     controlfd = client_connect(hostname, argv[1]);
     command_loop(controlfd, hostname);

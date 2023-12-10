@@ -1,32 +1,22 @@
 #include "myftp.h"
 
-
 char* read_socket(int sockfd, pid_t pid) {
     int buffer_size = 1;
     char *buffer = malloc(buffer_size);
-
     ssize_t bytes_read;
     size_t total_read = 0;
     
     while (1) {
         bytes_read = read(sockfd, buffer + total_read, 1);
-
         if (bytes_read <= 0) { 
-            if (bytes_read == 0) {
-
-                fprintf(stderr, "Child %d: client unexpectadly closed connection, exiting\n", pid);
-
-            } else {
-                fprintf(stderr, "Child %d: Error: read command from control socket failed STRERR: %s, ERRNO: %d, exiting\n",pid, strerror(errno), errno);
-            }
+            if (bytes_read == 0) fprintf(stderr, "Child %d: client unexpectadly closed connection, exiting\n", pid);
+            else fprintf(stderr, "Child %d: Error: read command from control socket failed STRERR: %s, ERRNO: %d, exiting\n",pid, strerror(errno), errno);
             free(buffer);
             close(sockfd);
             exit(1);
         }
 
-        if (buffer[total_read] == '\n'){
-            break;
-        }
+        if (buffer[total_read] == '\n') break;
         total_read ++;
 
         if (total_read >= buffer_size - 1) {
@@ -45,36 +35,31 @@ void send_ack(int controlfd, int pid, char *message){
     } else {
         if (write(controlfd, message, strlen(message)) == strlen(message))return;
     }
-
     fprintf(stderr, "Child %d: Error: acknowledgment to client failed, STRERR: %s, ERRNO: %d ... child exiting\n", pid, strerror(errno), errno);
     exit(1);
-
 }
 
-int rls(int connfd, int pid, int controlfd){
+int rls(int datafd, int pid, int controlfd){
     pid_t inner_pid = fork();
-
     if (inner_pid < 0){
         fprintf(stderr, "Child %d: Error: fork in rls failed, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
         return 1;
     }
     
-
     if (inner_pid == 0){
-        dup2(connfd, STDOUT_FILENO);
-        close(connfd);
+        dup2(datafd, STDOUT_FILENO);
+        close(datafd);
         close(controlfd);
         execlp("ls", "ls", "-l", (char *) NULL);
         exit(1);
     }
 
     send_ack(controlfd, pid, NULL);
-
     int result;
     waitpid(inner_pid, &result, 0);
-    close(connfd);
+    close(datafd);
     if (WIFEXITED(result) && WEXITSTATUS(result) == 0){
-        printf("Child %d: ls data sent over data connection: %d\n", pid);
+        printf("Child %d: ls data sent over data connection\n", pid);
         return 0;
     }
 
@@ -89,10 +74,10 @@ int get_file(int controlfd, int datafd, int pid, char *path){
 
     printf("Child %d: Reading file %s\n", pid, path);
     
-
     if (stat(path, &statbuf) != 0) {
         if (errno == ENOENT) {
             send_ack(controlfd, pid, "ENo such file or directory\n");
+            printf("Child %d: Could not read No Such File \n", pid);
         } else {
         fprintf(stderr, "Child %d: Error: getting file status, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
         send_ack(controlfd, pid, "ECould not get the file status\n");
@@ -101,15 +86,17 @@ int get_file(int controlfd, int datafd, int pid, char *path){
     }
     if (!(statbuf.st_mode & S_IRUSR)) {
         send_ack(controlfd, pid, "ENo read permission on file\n");
+        printf("Child %d: Could not read no permission \n", pid);
         return 0;
     }
     if (!(S_ISREG(statbuf.st_mode))) {
         send_ack(controlfd, pid, "EThe specified path is not a Regular File\n");
+        printf("Child %d: Could not read not reg file\n", pid);
         return 0;
     }
-
     if ((infile = open(path, O_RDONLY, 0600)) < 0) {
         send_ack(controlfd, pid, "ECould not open file for reading\n");
+        fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
         close(infile);
         return 0;
     }
@@ -118,13 +105,15 @@ int get_file(int controlfd, int datafd, int pid, char *path){
     while ((bytes = read(infile, buf, FILESENDBUF)) > 0) {
         if (write(datafd, buf, bytes) != bytes){
             fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
+            close(infile);
+            return 1;
         }
     }
     if (bytes == -1) {
         send_ack(controlfd, pid, "Eerror reading File\n");
         fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
         close(infile);
-        return 0;
+        return 1;
     }
     
     close(infile);
@@ -134,7 +123,6 @@ int get_file(int controlfd, int datafd, int pid, char *path){
 int put_file(int controlfd, int datafd, int pid, char *path){
     char buf[FILESENDBUF];
     int bytes;
-
     int filefd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
     if (filefd < 0) {
         if (errno == EEXIST) {
@@ -151,25 +139,22 @@ int put_file(int controlfd, int datafd, int pid, char *path){
     printf("Child %d: reciving file %s from client\n", pid, path);
     send_ack(controlfd, pid, NULL);
     while ((bytes = read(datafd, buf, FILESENDBUF)) > 0) {
-        
         if (write(filefd, buf, bytes) != bytes){
-            fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d, exiting\n", pid, strerror(errno), errno);
-            unlink(filefd);
+            fprintf(stderr, "Child %d: Error: error Transmitting data, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
+            unlink(path);
+            break;
         }
     }
     if (bytes == -1) {
-        fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d\n exiting...", pid, strerror(errno), errno);
-        unlink(filefd);   
+        fprintf(stderr, "Child %d: Error: reading file, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
+        unlink(path);   
     }
-    
     close(filefd);
     return 0;
-
 }
 
 int handle_data_commands(int controlfd, pid_t pid){
     char *buffer;
-
     int datafd;
     struct sockaddr_in servAddr;
     socklen_t addrlen = sizeof(servAddr);
@@ -220,7 +205,6 @@ int handle_data_commands(int controlfd, pid_t pid){
         return 1;
     }
     close(datafd);
-
     printf("Child %d: Data socket accepted connection:\n", pid);
 
     buffer = read_socket(controlfd, pid);
@@ -231,22 +215,14 @@ int handle_data_commands(int controlfd, pid_t pid){
         return rls(connfd, pid, controlfd);
     } 
     
-    else if (buffer[0] == 'G') { 
-        get_file(controlfd, connfd, pid, &buffer[1]);
-
-
-    } else if (buffer[0] == 'P') { // put
+    else if (buffer[0] == 'G') get_file(controlfd, connfd, pid, &buffer[1]);
+    else if (buffer[0] == 'P') { 
         char *filename = strrchr(&buffer[1], '/');
-
         filename = (!filename) ? &buffer[1] : &filename[1];
-
         put_file(controlfd, connfd, pid, filename);
-
     }
     free(buffer);
     close(connfd);
-    
-
     return 0;
 }
 
@@ -277,26 +253,22 @@ void change_dir(int controlfd, int pid, char *path){
 }
 
 void command_loop(int connectfd, pid_t pid){
-    char *buffer;
-    char *path;
-
+    char *buffer, *path;
+    
     while(1){
         buffer = read_socket(connectfd, pid);
         printf("Child %d: command recived: %s\n",pid, buffer);
 
         if (buffer[0] == 'D') {
             if (handle_data_commands(connectfd, pid) == 1) break;
-
-        } else if (buffer[0] == 'C') change_dir(connectfd, pid, &buffer[1]);
-        
+        } 
+        else if (buffer[0] == 'C') change_dir(connectfd, pid, &buffer[1]);
         else if (buffer[0] == 'Q') {
             fprintf(stderr, "Child %d: quitting normally...\n", pid);
             send_ack(connectfd, pid, NULL);
             break;
         }
         free(buffer);
-        
-        
     }
     if (close(connectfd) == -1) {
         fprintf(stderr, "Child %d: Error: Closing connection socket, STRERR: %s, ERRNO: %d\n", pid, strerror(errno), errno);
@@ -306,12 +278,10 @@ void command_loop(int connectfd, pid_t pid){
     exit(0);
 }
 
-
-
 void handle_connection(int connectfd, struct sockaddr_in clientAddr, int listenfd) {
 
     pid_t pid = getpid();
-    
+
     if (close(listenfd) == -1) fprintf(stderr, "Error: Closing listen socket, STRERR: %s, ERRNO: %d\n", strerror(errno), errno);
 
     char hostName[NI_MAXHOST];
@@ -324,16 +294,10 @@ void handle_connection(int connectfd, struct sockaddr_in clientAddr, int listenf
     printf("Child %d: Connection accepted from host %s\n", pid, hostName);
 
     command_loop(connectfd, pid);
-
 }
-
-
-
-
 
 int main(int argc, char const *argv[]){
 
-//some socket creation code reused from asisgnent 8
     int listenfd, connectfd;
     struct sockaddr_in servAddr, clientAddr;
 
